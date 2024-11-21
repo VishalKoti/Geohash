@@ -1,0 +1,36 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, udf, count
+from pyspark.sql.types import StringType, DoubleType
+import geohash2
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("Geohash Density").getOrCreate()
+
+# Load CSV data
+file_path = "path_to_your_file.csv"
+df = spark.read.csv(file_path, header=True, inferSchema=True)
+
+# Define UDF to calculate geohash
+def calculate_geohash(lat, lon, precision=6):
+    return geohash2.encode(lat, lon, precision)
+
+geohash_udf = udf(calculate_geohash, StringType())
+
+# Add geohash column
+df = df.withColumn("geohash", geohash_udf(col("lat"), col("long")))
+
+# Group by geohash and count the number of points
+geohash_counts = df.groupBy("geohash").agg(count("*").alias("point_count"))
+
+# Approximate area for geohash precision 6 (~1.2 km x ~0.61 km)
+geohash_area_km2 = 1.2 * 0.61  # in square kilometers
+
+# Add density column
+geohash_density = geohash_counts.withColumn("density", col("point_count") / geohash_area_km2)
+
+# Show results
+geohash_density.show()
+
+# Save results to a CSV file if needed
+output_path = "path_to_output.csv"
+geohash_density.write.csv(output_path, header=True)
