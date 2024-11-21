@@ -1,0 +1,33 @@
+# Heatmap using folium
+
+import pandas as pd
+import folium
+from folium.plugins import HeatMap
+import geohash2
+
+# Load your CSV file
+file_path = "path_to_your_csv_file.csv"  # Replace with your file path
+df = pd.read_csv(file_path)
+
+# Decode geohash to lat/long center points
+def geohash_to_latlong(geohash):
+    lat, lon = geohash2.decode(geohash)
+    return lat, lon
+
+df["lat"], df["long"] = zip(*df["geohash"].map(geohash_to_latlong))
+
+# Prepare data for heatmap
+heatmap_data = df[["lat", "long", "point_count"]].values.tolist()
+
+# Create a folium map centered around the average location
+map_center = [df["lat"].mean(), df["long"].mean()]
+m = folium.Map(location=map_center, zoom_start=6)
+
+# Add heatmap layer
+HeatMap(heatmap_data, radius=15, blur=10, max_zoom=1).add_to(m)
+
+# Save the map to an HTML file
+output_path = "heatmap.html"  # Replace with your desired output path
+m.save(output_path)
+
+print(f"Heatmap saved to {output_path}")
