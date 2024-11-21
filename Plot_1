@@ -1,0 +1,75 @@
+# PySpark and Matplotlib Code
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, udf, floor
+from pyspark.sql.types import DoubleType
+import matplotlib.pyplot as plt
+import numpy as np
+import geohash2
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("Heatmap").getOrCreate()
+
+# Load CSV file
+file_path = "path_to_your_csv_file.csv"  # Replace with your CSV file path
+df = spark.read.csv(file_path, header=True, inferSchema=True)
+
+# Decode geohash to lat/long
+def decode_geohash(geohash):
+    lat, lon = geohash2.decode(geohash)
+    return lat, lon
+
+decode_lat_udf = udf(lambda geohash: decode_geohash(geohash)[0], DoubleType())
+decode_lon_udf = udf(lambda geohash: decode_geohash(geohash)[1], DoubleType())
+
+df = df.withColumn("lat", decode_lat_udf(col("geohash"))).withColumn("long", decode_lon_udf(col("geohash")))
+
+# Create bins for latitude and longitude
+resolution = 0.5  # Grid resolution in degrees
+df = df.withColumn("lat_bin", (floor(col("lat") / resolution) * resolution).cast(DoubleType()))
+df = df.withColumn("long_bin", (floor(col("long") / resolution) * resolution).cast(DoubleType()))
+
+# Aggregate point counts for each grid cell
+heatmap_df = (
+    df.groupBy("lat_bin", "long_bin")
+    .sum("point_count")
+    .withColumnRenamed("sum(point_count)", "point_count")
+)
+
+# Collect data for plotting
+heatmap_data = heatmap_df.collect()
+
+# Prepare data for matplotlib
+lats = [row["lat_bin"] for row in heatmap_data]
+lons = [row["long_bin"] for row in heatmap_data]
+counts = [row["point_count"] for row in heatmap_data]
+
+# Convert to 2D grid
+lat_bins = np.arange(min(lats), max(lats) + resolution, resolution)
+lon_bins = np.arange(min(lons), max(lons) + resolution, resolution)
+
+heatmap, lat_edges, lon_edges = np.histogram2d(
+    lats, lons, bins=[lat_bins, lon_bins], weights=counts
+)
+
+# Plot heatmap using matplotlib
+fig, ax = plt.subplots(figsize=(12, 8))
+heatmap_plot = ax.pcolormesh(
+    lon_edges,
+    lat_edges,
+    heatmap,
+    cmap="Reds",
+    shading="auto"
+)
+
+# Add color bar
+cbar = plt.colorbar(heatmap_plot, ax=ax, orientation="horizontal", pad=0.05)
+cbar.set_label("Density (Points per Grid Cell)")
+
+# Add labels and title
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+ax.set_title("Heatmap of Ship Density")
+
+# Show plot
+plt.show()
