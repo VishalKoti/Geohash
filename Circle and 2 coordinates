@@ -1,0 +1,55 @@
+from pyspark.sql import SparkSession
+from math import radians, sin, cos, sqrt, atan2
+import folium
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("CircleOnMap").getOrCreate()
+
+# Function to calculate haversine distance
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth's radius in kilometers
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1-a))
+    return R * c  # Distance in kilometers
+
+# Define coordinates
+data = [("Lost", 12.971598, 77.594566),  # Example: Bangalore
+        ("Found", 13.082680, 80.270718)]  # Example: Chennai
+
+# Create a DataFrame
+columns = ["Type", "Latitude", "Longitude"]
+df = spark.createDataFrame(data, columns)
+
+# Get the "lost" and "found" points
+lost = df.filter(df.Type == "Lost").collect()[0]
+found = df.filter(df.Type == "Found").collect()[0]
+
+# Compute the distance
+distance_km = haversine(lost.Latitude, lost.Longitude, found.Latitude, found.Longitude)
+
+print(f"Distance between points: {distance_km} km")
+
+# Visualization using Folium
+# Create a map centered at the lost location
+map_center = [lost.Latitude, lost.Longitude]
+map_obj = folium.Map(location=map_center, zoom_start=6)
+
+# Add lost and found markers
+folium.Marker([lost.Latitude, lost.Longitude], popup="Lost", icon=folium.Icon(color="red")).add_to(map_obj)
+folium.Marker([found.Latitude, found.Longitude], popup="Found", icon=folium.Icon(color="green")).add_to(map_obj)
+
+# Add a circle with radius equal to the distance
+folium.Circle(
+    location=[lost.Latitude, lost.Longitude],
+    radius=distance_km * 1000,  # Convert km to meters
+    color="blue",
+    fill=True,
+    fill_opacity=0.2
+).add_to(map_obj)
+
+# Save the map as an HTML file
+map_obj.save("map_with_circle.html")
+print("Map with circle has been saved as map_with_circle.html")
