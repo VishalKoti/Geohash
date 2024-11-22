@@ -53,3 +53,12 @@ folium.Circle(
 # Save the map as an HTML file
 map_obj.save("map_with_circle.html")
 print("Map with circle has been saved as map_with_circle.html")
+
+
+
+
+
+
+
+python -m http.server
+
