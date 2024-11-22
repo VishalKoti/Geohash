@@ -84,3 +84,13 @@ ax.set_title("Heatmap of Ship Density")
 
 # Show plot
 plt.show()
+
+
+### If the Error Persists:
+Double-check your data for:
+
+Missing or invalid geohashes in the input data.
+Any rows in the input CSV where point_count is NULL.
+If necessary, preprocess the data by dropping such rows before further processing:
+
+df = df.filter(col("point_count").isNotNull())
