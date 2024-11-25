@@ -1,0 +1,38 @@
+from pyspark.sql import SparkSession
+import geohash
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("CommonGeohashFinder").getOrCreate()
+
+# Define a function to find neighbors iteratively until a common geohash is found
+def find_common_geohash(geo1, geo2):
+    visited1 = {geo1}  # Start with the first geohash
+    visited2 = {geo2}  # Start with the second geohash
+    current1 = {geo1}
+    current2 = {geo2}
+    
+    while True:
+        # Expand neighbors for both geohashes
+        neighbors1 = {neighbor for g in current1 for neighbor in geohash.neighbors(g)}
+        neighbors2 = {neighbor for g in current2 for neighbor in geohash.neighbors(g)}
+        
+        # Update visited sets and current sets
+        current1 = neighbors1 - visited1
+        current2 = neighbors2 - visited2
+        visited1.update(current1)
+        visited2.update(current2)
+        
+        # Check for intersection
+        common = visited1 & visited2
+        if common:
+            return list(common)  # Return the first common geohash found
+
+# Input geohashes
+geohash1 = "u4pruyd"
+geohash2 = "u4pruyc"
+
+# Find the common geohash
+common_geohashes = find_common_geohash(geohash1, geohash2)
+
+# Print result
+print(f"Common geohash(es) between {geohash1} and {geohash2}: {common_geohashes}")
