@@ -1,0 +1,27 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf, col
+import geohash
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("GeohashNeighbors").getOrCreate()
+
+# Sample data containing geohashes
+data = [("u4pruyd",), ("u4pruyc",), ("u4pruyg",)]
+columns = ["geohash"]
+
+# Create a DataFrame
+df = spark.createDataFrame(data, columns)
+
+# Define a UDF to compute neighbors
+def get_neighbors(gh):
+    neighbors = geohash.neighbors(gh)
+    return neighbors
+
+# Register the UDF
+neighbors_udf = udf(get_neighbors)
+
+# Add neighbors column
+result_df = df.withColumn("neighbors", neighbors_udf(col("geohash")))
+
+# Show the result
+result_df.show(truncate=False)
