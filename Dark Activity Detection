@@ -1,0 +1,99 @@
+import geohash2
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf, col
+from pyspark.sql.types import StringType, IntegerType, FloatType
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("DarkActivityDetection").getOrCreate()
+
+# Sample dataset
+data = [
+    {"ship_id": 1, "lost_lat": 12.971598, "lost_long": 77.594566, "found_lat": 12.925007, "found_long": 77.593803},
+    # Add more entries as needed
+]
+
+historical_data = [
+    {"geohash": "tdnv7", "signal_count": 100},
+    {"geohash": "tdnv6", "signal_count": 50},
+    # Add historical geohash signal counts
+]
+
+# Create DataFrames
+df = spark.createDataFrame(data)
+hist_df = spark.createDataFrame(historical_data)
+
+# Geohash UDFs
+geohash_udf = udf(lambda lat, lon: geohash2.encode(lat, lon, precision=6), StringType())
+intermediate_geohashes_udf = udf(lambda start, end: list(geohash2.bboxes(start, end)), StringType())
+
+# Add geohashes for lost and found positions
+df = df.withColumn("lost_geohash", geohash_udf(col("lost_lat"), col("lost_long")))
+df = df.withColumn("found_geohash", geohash_udf(col("found_lat"), col("found_long")))
+
+# TODO: Replace intermediate_geohashes_udf with a proper algorithm to generate geohashes between
+# Add intermediate geohashes
+df = df.withColumn("intermediate_geohashes", intermediate_geohashes_udf(col("lost_geohash"), col("found_geohash")))
+
+# Explode intermediate geohashes into individual rows
+intermediate_df = df.select("ship_id", "intermediate_geohashes").withColumn("geohash", col("intermediate_geohashes"))
+
+# Join with historical data to calculate density
+joined_df = intermediate_df.join(hist_df, on="geohash", how="left").fillna({"signal_count": 0})
+
+# Calculate total signal density
+density_df = joined_df.groupBy("ship_id").agg({"signal_count": "sum"}).withColumnRenamed("sum(signal_count)", "total_density")
+
+# Logic to determine suspicious activity
+threshold_density = 50  # Example threshold
+suspicious_df = density_df.withColumn(
+    "suspicious_activity",
+    (col("total_density") < threshold_density).cast(IntegerType())
+)
+
+# Display results
+suspicious_df.show()
+
+
+
+
+
+from geopy.distance import geodesic
+import geohash2
+
+# Function to generate intermediate geohashes
+def generate_intermediate_geohashes(start_lat, start_lon, end_lat, end_lon, precision=6, step_km=1):
+    start = (start_lat, start_lon)
+    end = (end_lat, end_lon)
+    
+    # Calculate the total distance between the two points
+    distance = geodesic(start, end).km
+    
+    # Determine the number of steps based on step_km
+    steps = int(distance // step_km) + 1  # Include both start and end points
+    geohashes = set()
+    
+    for step in range(steps + 1):
+        # Interpolate point
+        fraction = step / steps
+        interpolated_lat = start_lat + fraction * (end_lat - start_lat)
+        interpolated_lon = start_lon + fraction * (end_lon - start_lon)
+        
+        # Compute geohash for the interpolated point
+        geohash = geohash2.encode(interpolated_lat, interpolated_lon, precision)
+        geohashes.add(geohash)
+    
+    return list(geohashes)
+
+# Register the function as a UDF
+generate_geohashes_udf = udf(
+    lambda lost_lat, lost_long, found_lat, found_long: generate_intermediate_geohashes(
+        lost_lat, lost_long, found_lat, found_long
+    ), 
+    StringType()
+)
+
+# Replace intermediate_geohashes_udf with the updated UDF
+df = df.withColumn(
+    "intermediate_geohashes", 
+    generate_geohashes_udf(col("lost_lat"), col("lost_long"), col("found_lat"), col("found_long"))
+)
