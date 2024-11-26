@@ -1,0 +1,76 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf, col, explode, array_union, array
+from pyspark.sql.types import ArrayType, StringType
+from geopy.distance import geodesic
+import geohash2
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("GeohashNeighbors").getOrCreate()
+
+# Function to calculate geohash
+def generate_geohash(lat, lon, precision=6):
+    return geohash2.encode(lat, lon, precision)
+
+# Function to generate geohashes between two points
+def get_geohashes_between(lat1, lon1, lat2, lon2, precision=6):
+    start_geohash = generate_geohash(lat1, lon1, precision)
+    end_geohash = generate_geohash(lat2, lon2, precision)
+    
+    def haversine_dist(coord1, coord2):
+        return geodesic(coord1, coord2).meters
+
+    current_lat, current_lon = lat1, lon1
+    target_lat, target_lon = lat2, lon2
+    geohash_list = [start_geohash]
+    while haversine_dist((current_lat, current_lon), (target_lat, target_lon)) > 0.01:
+        step_lat = (target_lat - current_lat) * 0.01
+        step_lon = (target_lon - current_lon) * 0.01
+        current_lat += step_lat
+        current_lon += step_lon
+        current_geohash = generate_geohash(current_lat, current_lon, precision)
+        if current_geohash != geohash_list[-1]:
+            geohash_list.append(current_geohash)
+    if end_geohash not in geohash_list:
+        geohash_list.append(end_geohash)
+    return geohash_list
+
+# Function to get neighbors of a geohash
+def get_geohash_neighbors(geohash):
+    try:
+        return geohash2.neighbors(geohash)
+    except Exception:
+        return []
+
+# UDFs
+generate_geohash_udf = udf(lambda lat, lon: generate_geohash(lat, lon), StringType())
+get_geohashes_between_udf = udf(
+    lambda lat1, lon1, lat2, lon2: get_geohashes_between(lat1, lon1, lat2, lon2),
+    ArrayType(StringType())
+)
+get_geohash_neighbors_udf = udf(
+    lambda geohash: [geohash] + get_geohash_neighbors(geohash),
+    ArrayType(StringType())
+)
+
+# Create a DataFrame with the lost and found coordinates
+data = [
+    {"LostLat": 12.971598, "LostLon": 77.594566, "FoundLat": 12.29581, "FoundLon": 76.639381}
+]
+df = spark.createDataFrame(data)
+
+# Add intermediate geohashes as an array
+df = df.withColumn("IntermediateGeohashes", get_geohashes_between_udf(
+    col("LostLat"), col("LostLon"), col("FoundLat"), col("FoundLon")
+))
+
+# Explode the IntermediateGeohashes array into individual rows
+exploded_df = df.select(explode(col("IntermediateGeohashes")).alias("Geohash"))
+
+# Add column with each geohash and its neighbors in a single array
+result_df = exploded_df.withColumn("GeohashWithNeighbors", get_geohash_neighbors_udf(col("Geohash")))
+
+# Explode the combined geohash and neighbors into individual rows
+flattened_df = result_df.select(explode(col("GeohashWithNeighbors")).alias("Geohash"))
+
+# Show the result
+flattened_df.show(truncate=False)
