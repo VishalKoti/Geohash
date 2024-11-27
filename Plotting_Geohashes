@@ -1,0 +1,61 @@
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Polygon
+import matplotlib.pyplot as plt
+import geohash2
+
+# Function to get geohash boundaries
+def get_geohash_bounds(geohash):
+    """Returns the SW and NE corners of the geohash rectangle."""
+    lat_min, lon_min, lat_max, lon_max = geohash2.bounds(geohash)
+    return {
+        "geohash": geohash,
+        "lat_min": lat_min,
+        "lon_min": lon_min,
+        "lat_max": lat_max,
+        "lon_max": lon_max
+    }
+
+# Function to plot geohashes from a DataFrame
+def plot_geohashes(df, geohash_column):
+    """
+    Plots geohashes from a DataFrame on a world map.
+    
+    Parameters:
+    - df: Input DataFrame containing geohashes.
+    - geohash_column: Name of the column containing geohashes.
+    """
+    # Get geohash boundaries
+    geohash_bounds = [get_geohash_bounds(gh) for gh in df[geohash_column]]
+
+    # Create geometries for each geohash
+    geometries = [
+        Polygon([
+            (bounds["lon_min"], bounds["lat_min"]),
+            (bounds["lon_min"], bounds["lat_max"]),
+            (bounds["lon_max"], bounds["lat_max"]),
+            (bounds["lon_max"], bounds["lat_min"]),
+            (bounds["lon_min"], bounds["lat_min"])
+        ])
+        for bounds in geohash_bounds
+    ]
+
+    # Create GeoDataFrame
+    gdf = gpd.GeoDataFrame(geohash_bounds, geometry=geometries, crs="EPSG:4326")
+
+    # Plot world map
+    world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+    fig, ax = plt.subplots(figsize=(12, 8))
+    world.plot(ax=ax, color="lightgray")
+
+    # Plot geohashes
+    gdf.plot(ax=ax, edgecolor="red", facecolor="none")
+    plt.title("Geohashes on World Map")
+    plt.show()
+
+# Example DataFrame
+data = {"Geohash": ["tdr4z8", "tdr4z9", "tdr4z7", "tdr4z6"]}
+df = pd.DataFrame(data)
+
+# Plot the geohashes
+plot_geohashes(df, "Geohash")
