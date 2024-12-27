@@ -1,0 +1,60 @@
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Polygon
+import matplotlib.pyplot as plt
+
+# Function to decode a geohash string to a bounding box
+def decode_geohash(gh):
+    _base32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+    _bits = [16, 8, 4, 2, 1]
+    lat_interval = [-90.0, 90.0]
+    lon_interval = [-180.0, 180.0]
+    is_even = True
+
+    for c in gh:
+        cd = _base32.index(c)
+        for mask in _bits:
+            if is_even:
+                lon_interval[0 if cd & mask == 0 else 1] = \
+                    (lon_interval[0] + lon_interval[1]) / 2
+            else:
+                lat_interval[0 if cd & mask == 0 else 1] = \
+                    (lat_interval[0] + lat_interval[1]) / 2
+            is_even = not is_even
+
+    return {
+        "s": lat_interval[0],
+        "n": lat_interval[1],
+        "w": lon_interval[0],
+        "e": lon_interval[1]
+    }
+
+# Create a sample DataFrame
+data = {'geohash': ['u4pruydqqvj', 'u4pruydqqvj1', 'u4pruydqqvj2']}
+df = pd.DataFrame(data)
+
+# Function to create a polygon from a geohash bounding box
+def geohash_to_polygon(gh):
+    bbox = decode_geohash(gh)
+    return Polygon([
+        (bbox['w'], bbox['s']),
+        (bbox['w'], bbox['n']),
+        (bbox['e'], bbox['n']),
+        (bbox['e'], bbox['s']),
+        (bbox['w'], bbox['s']),
+    ])
+
+# Add geometry column to the DataFrame
+df['geometry'] = df['geohash'].apply(geohash_to_polygon)
+
+# Convert to GeoDataFrame
+gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+
+# Load world map
+world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+
+# Plot world map and geohashes
+fig, ax = plt.subplots(figsize=(10, 6))
+world.plot(ax=ax, color='lightgrey')
+gdf.plot(ax=ax, edgecolor='red', facecolor='none', linewidth=1.5)
+plt.show()
